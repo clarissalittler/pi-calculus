@@ -5,12 +5,32 @@ import Control.Monad
 import System.IO
 import Control.Monad.Reader
 
+import Text.PrettyPrint.HughesPJ
+
 type Name = String
 
 data Value = VName Name
            | VInt Int
            | VUnit
            deriving (Read, Show)
+ppVal (VName n) = text $ "@" ++ n
+ppVal (VInt i) = int i
+ppVal (VUnit) = lparen <> rparen
+
+ppProc (Receive x y p) = text ("@" ++ x) <> parens (text y) <> text "." <> ppProc p
+ppProc (Send n e p) = text ("@" ++ n) <> parens (ppExp e) <+> ppProc p
+ppProc (Par p1 p2) = ppProc p1 <+> text "|" <+> ppProc p2
+ppProc (Nu n p) = text ("nu @" ++ n ++ ".") <+> ppProc p
+ppProc (Serv p) = text "!" <> ppProc p
+ppProc Terminate = text "end"
+
+ppExp (EWrite e) = text "write" <> parens (ppExp e)
+ppExp ERead = text "read"
+ppExp (EAdd e1 e2) = ppExp e1 <+> text "+" <+> ppExp e2
+ppExp (ENeg e) = text "-" <> ppExp e
+ppExp (EMult e1 e2) = ppExp e1 <+> text "*" <+> ppExp e2
+ppExp (EVal v) = ppVal v
+ppExp (EVar n) = text n
 
 data Proc = Receive Name Name Proc
           | Send Name Exp Proc
