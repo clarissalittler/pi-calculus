@@ -24,12 +24,15 @@ data Proc = Receive Name Name Proc
           | Print Name
           | Terminate
 
+instance Show Proc where
+    show = render . ppProc
+
 type Env a = [(Name,a)]
 
-type Interp = ReaderT (Env (MVar Value)) IO
+type Interp = ReaderT (Env (MVar Value), Chan String) IO
 
-ppProc (Receive x y p) = text x <> parens (text y) <> text "." <> ppProc p
-ppProc (Send n v p) = text ("@" ++ n) <> parens (text v) <+> ppProc p
+ppProc (Receive x y p) = text x <> parens (text y) <> text "." <+> ppProc p
+ppProc (Send n v p) = text ("@" ++ n) <> parens (text v) <> text "." <+> ppProc p
 ppProc (Par p1 p2) = parens $ ppProc p1 <+> text "|" <+> ppProc p2
 ppProc (Nu n p) = text ("nu " ++ n ++ ".") <+> ppProc p
 ppProc (Serv p) = text "!" <> ppProc p
@@ -43,21 +46,23 @@ lexeme = L.lexeme spacey
 symbol = L.symbol spacey
 
 many1 p = do
-  vs <- many p
   v <- p
-  return $ vs ++ [v]
+  vs <- many p
+  return $ v : vs
 
 name = lexeme (many1 letterChar)
 paren = between (symbol "(") (symbol ")")
 dot = symbol "."
 
-parseProc = sendParse 
-            <|> receiveParse 
-            <|> parParse 
-            <|> nuParse 
-            <|> termParse
-            <|> serveParse
-            <|> printParse
+tries = choice . map try
+
+parseProc = tries [sendParse,
+                   receiveParse,
+                   parParse,
+                   nuParse,
+                   termParse,
+                   serveParse,
+                   printParse]
 
 sendParse = do 
   symbol "@"
@@ -93,15 +98,19 @@ printParse = do
   v <- paren $ name
   return $ Print v
 
-
 forkM :: Interp a -> Interp ()
 forkM x = do
   e <- ask
   liftIO $ forkIO $ (runReaderT x e >> return ())
   return ()
 
+putText :: String -> Interp ()
+putText s = do
+  c <- asks snd
+  liftIO $ writeChan c s
+
 withChan :: Name -> MVar Value -> Interp a -> Interp a
-withChan n m = local (\ec -> (n,m) : ec)
+withChan n m = local (\(ec,chan) -> ((n,m) : ec,chan))
 
 nameChange x y z = if z == x then y else z
 
@@ -128,27 +137,49 @@ substName x y (Nu n p) | x /= n && y /= n = Nu n (substName x y p)
 -- maybe that's a cheap way to deal, I'm not sure how much I care at the moment
 
 interpProc :: Proc -> Interp ()
-interProc (Print n) = liftIO $ putStrLn n
-interpProc Terminate = liftIO $ putStrLn "Thread terminated"
+interpProc (Print n) = putText n
+interpProc Terminate = putText "thread ended"
 interpProc (Par p1 p2) = do
   forkM $ interpProc p1
   interpProc p2
 interpProc (Serv p) = do
-  liftIO $ threadDelay 2000
+  liftIO $ threadDelay 6000
   forkM $ interpProc p
   interpProc (Serv p)
 interpProc (Nu n p) = do
   m <- liftIO newEmptyMVar
   withChan n m $ interpProc p
 interpProc (Send x y p) = do
-  env <- ask
+  env <- asks fst
   case lookup x env of
     Nothing -> error "channel doesn't exist"
     Just m -> (liftIO $ putMVar m y) >> interpProc p
 interpProc (Receive x y p) = do
-  ec <- ask
+  ec <- asks fst
   case lookup x ec of
     Nothing -> error "channel doesn't exist"
     Just m -> do
-      v <- liftIO $ readMVar m
+      v <- liftIO $ takeMVar m
       interpProc $ substName y v p
+
+readerThread c = do
+  w <- readChan c
+  putStrLn w
+  readerThread c
+interpProgram prog = do 
+  c <- newChan
+  forkIO $ readerThread c 
+  runReaderT (interpProc prog) ([],c)
+interpProgram' prog = case runParser parseProc "input" prog of
+                        Left err -> error (show err)
+                        Right p -> interpProgram p
+
+runFile filename = do
+  p <- readFile filename
+  case runParser parseProc filename p of
+    Left err -> error (show err)
+    Right prog -> interpProgram prog
+
+testProg1 = "nu x. ! (x(y). print(y) | @x(z). end)"
+testProg2 = "nu x. (x(y). print(y) | @x(z). end)" 
+
