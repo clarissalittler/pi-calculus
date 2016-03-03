@@ -138,7 +138,7 @@ substName x y (Nu n p) | x /= n && y /= n = Nu n (substName x y p)
 
 interpProc :: Proc -> Interp ()
 interpProc (Print n) = putText n
-interpProc Terminate = putText "thread ended"
+interpProc Terminate = return () -- putText "thread ended"
 interpProc (Par p1 p2) = do
   forkM $ interpProc p1
   interpProc p2
@@ -174,11 +174,7 @@ interpProgram' prog = case runParser parseProc "input" prog of
                         Left err -> error (show err)
                         Right p -> interpProgram p
 
-runFile filename = do
-  p <- readFile filename
-  case runParser parseProc filename p of
-    Left err -> error (show err)
-    Right prog -> interpProgram prog
+runFile filename = readFile filename >>= interpProgram' 
 
 testProg1 = "nu x. ! (x(y). print(y) | @x(z). end)"
 testProg2 = "nu x. (x(y). print(y) | @x(z). end)" 
