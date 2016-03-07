@@ -8,11 +8,13 @@ import Control.Monad.Reader
 import Text.PrettyPrint.HughesPJ
 
 type Name = String
+type Var = String
 
 data Value = VName Name
            | VInt Int
            | VUnit
            deriving (Read, Show)
+
 ppVal (VName n) = text $ "@" ++ n
 ppVal (VInt i) = int i
 ppVal (VUnit) = lparen <> rparen
@@ -44,12 +46,19 @@ data Exp = EWrite Exp
          | EAdd Exp Exp
          | ENeg Exp
          | EMult Exp Exp
-         | EVal Value -- there's a distinction here between names-as-values and names-as-variables, not sure how to present that in the syntax
+         | EVal Value 
          | EVar Name
+         | EPrint 
 
-type Env a = [(Name,a)]
+type NEnv a = [(Name,a)]
+type VEnv a = [(Var,a)]
 
-type Interp = ReaderT (Env (MVar Value), Env Value) IO
+data InterpEnv = IE { inboxes :: NEnv (MVar Value), -- inboxes
+                      venv :: VEnv Value, -- value env
+                      outc :: Chan String, -- output queue
+                      inc :: Chan String} -- input queue
+
+type Interp = ReaderT InterpEnv IO
 
 forkM :: Interp a -> Interp ()
 forkM x = do
