@@ -53,7 +53,7 @@ data Exp = EWrite Exp
 type NEnv a = [(Name,a)]
 type VEnv a = [(Var,a)]
 
-data InterpEnv = IE { inboxes :: NEnv (MVar Value), -- inboxes
+data InterpEnv = IE { menv :: NEnv (MVar Value), -- inboxes
                       venv :: VEnv Value, -- value env
                       outc :: Chan String, -- output queue
                       inc :: Chan String} -- input queue
@@ -66,11 +66,16 @@ forkM x = do
   liftIO $ forkIO $ (runReaderT x e >> return ())
   return ()
 
-withChan :: Name -> MVar Value -> Interp a -> Interp a
-withChan n m = local (\(ec,ev) -> ((n,m) : ec,ev))
+withMVar :: Name -> MVar Value -> Interp a -> Interp a
+withMVar n m = local $ \e -> let ms = menv e 
+                             in e{menv = ((n,m) : ms)}
 
 withVal :: Name -> Value -> Interp a -> Interp a
-withVal n v = local (\(ec,ev) -> (ec, (n,v): ev))
+withVal n v = local $ \e -> let vn = venv e
+                            in e{venv = ((n,v) : vn)}
+
+lookupMVar :: Name -> Interp (MVar Value)
+lookupMVar n = undefined
 
 interpProc :: Proc -> Interp ()
 interpProc Terminate = return ()
@@ -126,3 +131,8 @@ interpExp (EVar n) = do
   case lookup n venv of
     Nothing -> error "unbound variable"
     Just x -> return x
+
+readerThread c = do
+  w <- readChan c
+  putStrLn w
+  readerThread c
