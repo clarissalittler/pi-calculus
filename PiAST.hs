@@ -75,7 +75,11 @@ withVal n v = local $ \e -> let vn = venv e
                             in e{venv = ((n,v) : vn)}
 
 lookupMVar :: Name -> Interp (MVar Value)
-lookupMVar n = undefined
+lookupMVar n = do
+  env <- asks menv
+  case lookup n env of
+    Nothing -> error "MVar doesn't exist"
+    Just m -> return m
 
 interpProc :: Proc -> Interp ()
 interpProc Terminate = return ()
@@ -89,18 +93,14 @@ interpProc (Nu n p) = do
   m <- liftIO $ newEmptyMVar
   withChan n m $ interpProc p
 interpProc (Send n e p) = do
-  env <- asks fst
+  m <- lookupMVar c
   v <- interpExp e
-  case lookup n env of
-    Nothing -> error "channel doesn't exist"
-    Just m -> (liftIO $ putMVar m v) >> interpProc p
+  liftIO $ putMVar m v
+  interpProc p
 interpProc (Receive c y p) = do
-  ec <- asks fst
-  case lookup c ec of
-    Nothing -> error "channel doesn't exist"
-    Just m -> do
-      v <- liftIO $ readMVar m
-      withVal y v $ interpProc p
+  m <- lookupMVar c
+  v <- liftIO $ readMVar m
+  withVal y v $ interpProc p
 
 liftNumV :: (Int -> Int) -> Value -> Value
 liftNumV op (VInt i) = VInt (op i)
