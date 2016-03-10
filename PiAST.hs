@@ -66,8 +66,8 @@ forkM x = do
   liftIO $ forkIO $ (runReaderT x e >> return ())
   return ()
 
-withMVar :: Name -> MVar Value -> Interp a -> Interp a
-withMVar n m = local $ \e -> let ms = menv e 
+withInbox :: Name -> MVar Value -> Interp a -> Interp a
+withInbox n m = local $ \e -> let ms = menv e 
                              in e{menv = ((n,m) : ms)}
 
 withVal :: Name -> Value -> Interp a -> Interp a
@@ -91,9 +91,9 @@ interpProc (Serv p) = do
   interpProc (Serv p)
 interpProc (Nu n p) = do
   m <- liftIO $ newEmptyMVar
-  withChan n m $ interpProc p
+  withInbox n m $ interpProc p
 interpProc (Send n e p) = do
-  m <- lookupMVar c
+  m <- lookupMVar n
   v <- interpExp e
   liftIO $ putMVar m v
   interpProc p
@@ -127,8 +127,8 @@ interpExp (EMult e1 e2) = do
   return $ liftNumV2 (+) v1 v2
 interpExp (EVal v) = return v
 interpExp (EVar n) = do
-  (_,venv) <- ask
-  case lookup n venv of
+  ve <- asks venv
+  case lookup n ve of
     Nothing -> error "unbound variable"
     Just x -> return x
 
