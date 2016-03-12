@@ -27,7 +27,6 @@ ppProc (Serv p) = text "!" <> ppProc p
 ppProc Terminate = text "end"
 
 ppExp (EWrite e) = text "write" <> parens (ppExp e)
-ppExp ERead = text "read"
 ppExp (EAdd e1 e2) = ppExp e1 <+> text "+" <+> ppExp e2
 ppExp (ENeg e) = text "-" <> ppExp e
 ppExp (EMult e1 e2) = ppExp e1 <+> text "*" <+> ppExp e2
@@ -42,13 +41,12 @@ data Proc = Receive Name Name Proc
           | Terminate
 
 data Exp = EWrite Exp
-         | ERead
          | EAdd Exp Exp
          | ENeg Exp
          | EMult Exp Exp
          | EVal Value 
          | EVar Name
-         | EPrint 
+
 
 type NEnv a = [(Name,a)]
 type VEnv a = [(Var,a)]
@@ -115,7 +113,6 @@ interpExp (EWrite e) = do
   v <- interpExp e
   liftIO (print v)
   return v
-interpExp ERead = liftIO readLn
 interpExp (EAdd e1 e2) = do
   v1 <- interpExp e1
   v2 <- interpExp e2

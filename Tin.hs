@@ -1,9 +1,9 @@
 module Tin where
 
 import Control.Concurrent
-import Control.Monad
+import Control.Monad hiding (forM)
 import System.IO
-import Control.Monad.Reader
+import Control.Monad.State hiding (forM)
 import Data.List
 
 import Text.PrettyPrint.HughesPJ
@@ -17,6 +17,46 @@ type Value = Name
 type Op = String
 type Var = String
 
+ppExp :: Exp -> Doc
+ppExp (EBinOp e1 op e2) = parens $ ppExp e1 <+> text op <+> ppExp e2
+ppExp (EUnOp op e) = parens $ text op <+> ppExp e
+ppExp (EInt i) = int i
+ppExp (EBool True) = text "true"
+ppExp (EBool False) = text "false"
+ppExp (EVar v) = text v
+ppExp (EString s) = quotes $ text s
+ppExp (EName n) = text n
+ppExp EUnit = lparen <> rparen
+
+ppStmt :: Stmt -> Doc
+ppStmt (SExp e) = ppExp e
+ppStmt (SReceive vs) = text "receive" <+> (hsep $ map text vs)
+ppStmt (SSend es) = text "send" <+> (hsep $ map ppExp es)
+ppStmt (SWhile e ss) = undefined
+
+ppDecl :: Decl -> Doc
+ppDecl (Decl n ss) = text n <+> hang equal 5 (vcat $ map ppStmt ss)
+
+ppVal :: Val -> Doc
+ppVal (VInt i) = int i
+ppVal (VString s) = quotes $ text s
+ppVal (VName n) = text n
+ppVal (VBool True) = text "true"
+ppVal (VBool False) = text "false"
+ppVal VUnit = lparen <> rparen
+
+instance Show Val where
+    show = render . ppVal
+
+instance Show Decl where
+    show = render . ppDecl
+
+instance Show Exp where
+    show = render . ppExp
+
+instance Show Stmt where
+    show = render . ppStmt
+
 data Exp = EBinOP Exp Op Exp
          | EUnOp Op Exp
          | EInt Int
@@ -24,17 +64,16 @@ data Exp = EBinOP Exp Op Exp
          | EString String
          | EVar Var
          | EUnit
-         | ERead
-         | EName String
+         | EName Name
          | EPrint Exp
          
 data Stmt = SExp Exp
           | SReceive [Var]
           | SSend Name [Exp]
-          | SWhile Exp Stmt
-          | SIf Exp Stmt Stmt
-          | SSeq Stmt Stmt
-          | SSkip -- we don't parse this one it's just for internal use
+          | SWhile Exp [Stmt]
+          | SIf Exp [Stmt] [Stmt]
+
+data Decl = Decl Name [Stmt]
 
 data Val = VInt Int
          | VString String
@@ -42,7 +81,6 @@ data Val = VInt Int
          | VBool Bool
          | VUnit 
          
-
 type NEnv a = [(Name,a)]
 type VEnv a = [(Var,a)]
 
@@ -51,23 +89,14 @@ type Inbox = Chan Val
 data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
                       venv :: VEnv Val, -- value env
                       outc :: Chan String, -- output queue
-                      inc :: Chan String,
-                      self :: Name} -- input queue
+                      self :: Name}
 
 type Interp = StateT InterpEnv IO
-                       
-addVars :: Var -> Val -> Interp ()
-addVars = undefined
 
 putText :: String -> Interp ()
 putText s = do
   c <- gets outc
   liftIO $ writeChan c s
-
-readText :: Interp String
-readText = do
-  c <- gets inc
-  liftIO $ readChan c
 
 forkM :: Interp a -> Interp ()
 forkM x = do
@@ -82,6 +111,12 @@ lookupInbox n = do
     Nothing -> error "unknown name in message"
     Just c -> return c
 
+                       
+addVars :: Var -> Val -> Interp ()
+addVars vr vl = modify $ \ie -> let ve = venv ie
+                                    ve' = (vr,vl):ve
+                                in ie{venv=ve'}
+
 forM :: Monad m => Int -> m a -> m [a]
 forM 0 m = fmap (\x -> [x]) m
 forM i m = do
@@ -89,10 +124,41 @@ forM i m = do
   as <- forM (i-1) m
   return $ a : as
 
-binOpTable :: [(String,Exp -> Exp -> Exp)]
-binOpTable = undefined
+liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
+liftNum2 f (VInt i) (VInt j) = VInt $ f i j
+liftNum2 _ _ _ = error "type error"
+
+liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
+liftStr2 f (VString s) (VString s') = VString $ f s s'
+liftStr2 _ _ _ = error "type error"
+
+binOpTable :: [(String,Val -> Val -> Val)]
+binOpTable = [("+",liftNum2 (+)),
+              ("-",liftNum2 (-)),
+              ("*",liftNum2 (*)),
+              ("/",liftNum2 div),
+              ("++",liftStr2 (++))]
+
+liftNum :: (Int -> Int) -> Val -> Val
+liftNum f (VInt i) = VInt $ f i
+liftNum _ _ = error "type error"
+
+unOpTable :: [(String,Val -> Val)]
+unOpTable = [("inv",liftNum $ \x -> -x)]              
 
 interpExp :: Exp -> Interp Val
+interpExp (EBinOp e1 op e2) = do
+  v1 <- interpExp e1
+  v2 <- interpExp e2
+  case lookup op binOpTable of
+    Nothing -> error "unknown operation"
+    Just op' -> return $ op' v1 v2
+interpExp (EUnOp op e) = do
+  v <- interpExp e
+  case lookup op unOpTable of
+    Nothing -> error "unknown operation"
+    Just op' -> return $ op' v
+interpExp (EName n) = return $ VName n
 interpExp (EInt i) = return $ VInt i
 interpExp (EString s) = return $ VString s
 interpExp (EBool b) = return $ VBool b
@@ -102,32 +168,55 @@ interpExp (EVar v) = do
   case lookup v ev of
     Nothing -> error "unknown variable"
     Just x -> return x
-interpExp ERead = fmap EName readText
 interpExp (EPrint e) = do
   v <- interpExp e
+  putText $ show v
+  return VUnit
   
 interpStmt :: Stmt -> Interp ()
 interpStmt (SExp e) = interpExp e >> return ()
-interpStmt SSkip = return ()
 interpStmt (SReceive vs) = do
   n <- gets self
   c <- lookupInbox n
-  vals <- forM (length vs - 1) (readChan c)
-  mapM addVars $ zip vs vals
-interpStmt (SSeq s1 s2) = do
-  interpStmt s1
-  interpStmt s2
+  vals <- forM (length vs - 1) (liftIO $ readChan c)
+  mapM_ (uncurry addVars) $ zip vs vals
 interpStmt (SIf e1 st sf) = do
   v <- interpExp e1
   case v of
-    VBool b -> if b then interpStmt st else interpStmt sf
+    VBool b -> if b then interpSeq st else interpSeq sf
     _ -> error "type error: non-boolean used in if statement"
 interpStmt (SSend n es) = do
   c <- lookupInbox n
   vals <- mapM interpExp es
-  writeList2Chan c vals
+  liftIO $ writeList2Chan c vals
 interpStmt (SWhile e s) = do
   v <- interpExp e
   case v of
-    VBool b -> if b then interpStmt s >> interpStmt (SWhile e s) else return ()
+    VBool b -> if b then interpSeq s >> interpStmt (SWhile e s) else return ()
     _ -> error "type error: non-boolean used in while statement"
+
+loop :: Monad m => m () -> m ()
+loop d = d >> (loop d)
+
+outThread c = loop $ do
+                w <- readChan c
+                putStrLn w
+
+makeInbox :: Decl -> IO (Name,Inbox)
+makeInbox (Decl n _) = do
+  m <- newChan
+  return (n,m)
+
+interpSeq :: [Stmt] -> Interp ()
+interpSeq = mapM_ interpStmt
+
+forkIO' :: IO a -> IO ThreadId
+forkIO' m = forkIO $ m >> return ()
+
+runProg :: [Decl] -> IO ()
+runProg ds = do
+  outChan <- newChan
+  forkIO $ outThread outChan
+  inboxes <- mapM makeInbox ds
+  mapM_ (\(Decl n ss) -> forkIO' $ runStateT (interpSeq ss) (IE inboxes [] outChan n)) ds
+
