@@ -17,6 +17,8 @@ type Value = Name
 type Op = String
 type Var = String
 
+-- Pretty Printing
+
 ppExp :: Exp -> Doc
 ppExp (EBinOp e1 op e2) = parens $ ppExp e1 <+> text op <+> ppExp e2
 ppExp (EUnOp op e) = parens $ text op <+> ppExp e
@@ -25,22 +27,22 @@ ppExp (EBool True) = text "true"
 ppExp (EBool False) = text "false"
 ppExp (EVar v) = text v
 ppExp (EString s) = quotes $ text s
-ppExp (EName n) = text n
 ppExp EUnit = lparen <> rparen
 
 ppStmt :: Stmt -> Doc
 ppStmt (SExp e) = ppExp e
-ppStmt (SReceive vs) = text "receive" <+> (hsep $ map text vs)
-ppStmt (SSend es) = text "send" <+> (hsep $ map ppExp es)
-ppStmt (SWhile e ss) = undefined
+ppStmt (SReceive vs) = text "receive" <+> (parens $ sep $ punctuate comma $ map text vs)
+ppStmt (SSend n es) = text "send" <+> text n <+> (parens $ sep $ punctuate comma $ map ppExp es)
+ppStmt (SWhile e ss) = text "while" <+> parens (ppExp e) <+> hang (text "do") 5 (braces $ hsep $ map ppStmt ss)
+ppStmt (SIf e sts sfs) = text "if" <+> parens (ppExp e) $+$ hang (text "then") 5 (braces $ hsep $ map ppStmt sts) 
+                         $+$ hang (text "else") 5 (braces $ hsep $ map ppStmt sfs)
 
 ppDecl :: Decl -> Doc
-ppDecl (Decl n ss) = text n <+> hang equal 5 (vcat $ map ppStmt ss)
+ppDecl (Decl n ss) = text n <+> hang equals 5 (vcat $ map ppStmt ss)
 
 ppVal :: Val -> Doc
 ppVal (VInt i) = int i
 ppVal (VString s) = quotes $ text s
-ppVal (VName n) = text n
 ppVal (VBool True) = text "true"
 ppVal (VBool False) = text "false"
 ppVal VUnit = lparen <> rparen
@@ -57,14 +59,105 @@ instance Show Exp where
 instance Show Stmt where
     show = render . ppStmt
 
-data Exp = EBinOP Exp Op Exp
+-- Parsing
+spacey :: Parser ()
+spacey = L.space (spaceChar >> return ()) (L.skipLineComment "--") (L.skipBlockComment "{-" "-}")
+lexeme = L.lexeme spacey
+symbol = L.symbol spacey
+
+many1 p = do
+  v <- p
+  vs <- many p
+  return $ v : vs
+
+name = lexeme (many1 letterChar)
+num = lexeme (many1 digitChar)
+paren = between (symbol "(") (symbol ")")
+bracey = between (symbol "{") (symbol "}")
+dot = symbol "."
+commaSep x = sepBy1 x (symbol ",")
+
+tries = choice . map try
+
+parseExp = tries [parseBin,
+                  parseUn,
+                  parseInt,
+                  parseBool,
+                  parseString,
+                  parseVar,
+                  parseUnit,
+                  parsePrint]
+
+parseBin = paren $ do
+             e1 <- parseExp
+             op <- many1 asciiChar
+             e2 <- parseExp
+             return $ EBinOp e1 op e2
+parseUn = paren $ do
+            op <- many1 asciiChar
+            e <- parseExp
+            return $ EUnOp op e
+parseInt = fmap (EInt . read) num
+parseBool = parseTrue <|> parseFalse
+    where parseTrue = symbol "true" >> return (EBool True)
+          parseFalse = symbol "false" >> return (EBool False)
+parseString = fmap EString $ between (symbol "\"") (symbol "\"") (many1 asciiChar)
+parseVar = fmap EVar name
+parseUnit = symbol "()" >> return EUnit
+parsePrint = do
+  symbol "print"
+  e <- paren $ parseExp
+  return $ EPrint e
+
+parseStmt = tries [fmap SExp parseExp,
+                   parseReceive,
+                   parseSend,
+                   parseWhile,
+                   parseIf]
+
+parseBlock = bracey $ many1 parseStmt
+
+parseReceive = do
+  symbol "receive"
+  vs <- paren $ commaSep name
+  return $ SReceive vs
+parseSend = do
+  symbol "send"
+  n <- name
+  es <- paren $ commaSep parseExp
+  return $ SSend n es
+parseWhile = do
+  symbol "while"
+  cond <- paren parseExp
+  symbol "do"
+  ss <- parseBlock
+  return $ SWhile cond ss
+parseIf = do
+  symbol "if"
+  cond <- paren parseExp
+  symbol "then"
+  trues <- parseBlock
+  symbol "else"
+  falses <- parseBlock
+  return $ SIf cond trues falses
+
+parseDecl = do
+  n <- name
+  symbol ":="
+  ss <- parseBlock
+  return $ Decl n ss
+
+parseProg = many1 parseDecl
+
+--
+
+data Exp = EBinOp Exp Op Exp
          | EUnOp Op Exp
          | EInt Int
          | EBool Bool
          | EString String
          | EVar Var
          | EUnit
-         | EName Name
          | EPrint Exp
          
 data Stmt = SExp Exp
@@ -77,7 +170,6 @@ data Decl = Decl Name [Stmt]
 
 data Val = VInt Int
          | VString String
-         | VName Name
          | VBool Bool
          | VUnit 
          
@@ -158,7 +250,6 @@ interpExp (EUnOp op e) = do
   case lookup op unOpTable of
     Nothing -> error "unknown operation"
     Just op' -> return $ op' v
-interpExp (EName n) = return $ VName n
 interpExp (EInt i) = return $ VInt i
 interpExp (EString s) = return $ VString s
 interpExp (EBool b) = return $ VBool b
@@ -212,6 +303,12 @@ interpSeq = mapM_ interpStmt
 
 forkIO' :: IO a -> IO ThreadId
 forkIO' m = forkIO $ m >> return ()
+
+runFile f = do
+  progText <- readFile f
+  case parse parseProg f progText of
+    Left e -> error $ show e
+    Right p -> runProg p
 
 runProg :: [Decl] -> IO ()
 runProg ds = do
