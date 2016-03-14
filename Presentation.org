@@ -1,0 +1,62 @@
+#+TITLE: Pies, Tins, and Calculi
+#+AUTHOR: Clarissa Littler
+
+#+startup: beamer
+#+BEAMER_THEME: Madrid
+#+LaTeX_CLASS: beamer
+#+LaTeX_CLASS_OPTIONS: [bigger]
+
+#+BEAMER_FRAME_LEVEL: 2
+* Models of Computation
+** This Talk
+   + A brief introduction to the $\pi$ calculus \pause
+   + Milner's translation of $\lambda$ into $\pi$ \pause
+   + An enriched $\pi$ calculus \pause
+   + The Tin language \pause
+   + A translation from Tin to our enriched $\pi$
+** A Universal Model of Computation
+   + Computation is independent of any description language \pause
+   + Turing complete \pause
+   + $\lambda$ calculus \pause
+   + Real world has concurrency \pause
+   + Turing machines and $\lambda$ calculi don't
+* Pi Calculus
+** Pi Calculus
+   + The $\pi$ calculus was introduced by Milner et al. in '92 \pause
+   + Calculus of communicating systems \pause
+   + Processes and channels, not functions and arguments \pause
+   + Simple syntax
+** Pi Calculus
+   \begin{align*}
+     P  &:= \\
+        &(\nu x. P) \\
+	&P | Q \\
+	& x(y). P \\
+	& \overline{x}(y). P \\
+	& \perp
+   \end{align*}
+** Pure Pi Calculus
+   + Only data are channels \pause 
+   + Synchronous communication \pause
+   + A universal model of computation? \pause
+   + Milner provided an embedding of $\lambda$
+** Pi to Lambda
+
+** In This Project
+   + ~PureLam.hs~
+   + ~PurePi.hs~
+   + ~LamToPi.hs~
+** Enriched Pi Calculus
+   + Ordinary $\pi$ calculus is sparse \pause
+   + Enriched with expressions and data
+** Enriched Pi Calculus
+#+BEGIN_SRC haskell :exports code
+
+#+END_SRC
+** Tin: An Imperative Concurrent Language
+   + Slightly higher level \pause
+   + Imperative language \pause
+     + while loops
+     + if statements
+     + sequenced code \pause
+   + 
