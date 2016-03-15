@@ -10,6 +10,7 @@ import Text.PrettyPrint.HughesPJ
 import Text.Megaparsec
 import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
+import ParserAux
 
 type Name = String
 
@@ -31,6 +32,14 @@ etaExp f = Abs "z" (App f (Var "z"))
 succ :: Lam -> Lam
 succ l = Abs "s" (Abs "z" (App (App l (Var "s")) (Var "z")))
 
+truth :: Lam
+truth = Abs "t" (Abs "f" (Var "t"))
+
+falsity :: Lam
+falsity = Abs "t" (Abs "f" (Var "f"))
+
+ifThen :: Lam -> Lam -> Lam -> Lam
+ifThen l t f = App (App l t) f
 
 instance Show Val where
     show = render . ppVal
@@ -42,22 +51,6 @@ ppLam (Abs n l) = parens $ text "\\" <+> text n <> text "." <+> ppLam l
 ppLam (App l1 l2) = parens $ ppLam l1 <+>  ppLam l2
 ppLam (Var n) = text n
 ppLam (Print n) = text "print" <> parens (text n)
-
-spacey :: Parser ()
-spacey = L.space (spaceChar >> return ()) (L.skipLineComment "--") (L.skipBlockComment "{-" "-}")
-lexeme = L.lexeme spacey
-symbol = L.symbol spacey
-
-many1 p = do
-  v <- p
-  vs <- many p
-  return $ v : vs
-
-name = lexeme (many1 letterChar)
-paren = between (symbol "(") (symbol ")")
-dot = symbol "."
-
-tries = choice . map try
 
 parseLam = tries [absParse,appParse,
                   printParse, varParse]
@@ -92,7 +85,7 @@ lookupM :: Name -> Interp Lam
 lookupM n = do
   env <- ask
   case lookup n env of
-    Nothing -> error "no such variable defined" -- might want to change this into just a variable evaluating to itself
+    Nothing -> error $ "no such variable defined: " ++ n  -- might want to change this into just a variable evaluating to itself
     Just l -> return l
 
 withVar :: Name -> Lam -> Interp a -> Interp a    
@@ -108,7 +101,10 @@ interpLam (Var n) = do
 interpLam (App l1 l2) = do
   v <- interpLam l1
   case v of
-    VAbs n l'' -> withVar n l2 $ interpLam l''
+    VAbs n l'' -> withVar n l2 $ do
+                          e <- ask
+                          liftIO $ print e
+                          interpLam l''
     _ -> error "unit applied as a function"
 interpLam (Abs n l) = return $ VAbs n l
 
@@ -120,3 +116,5 @@ interpProgram' p = case runParser parseLam "input" p of
 
 testProg1 = "(\\ x. x)"
 testProg2 = "((\\ x. x) (\\ y.y))"
+
+testProg3 = ifThen truth (Print "true") (Print "false")
