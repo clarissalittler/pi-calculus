@@ -7,6 +7,8 @@ import Control.Monad.State hiding (forM)
 import Data.List
 
 import Text.PrettyPrint.HughesPJ
+import ParserAux
+import Exp
 
 import Text.Megaparsec
 import Text.Megaparsec.String
@@ -14,20 +16,8 @@ import qualified Text.Megaparsec.Lexer as L
 
 type Name = String
 type Value = Name
-type Op = String
-type Var = String
 
 -- Pretty Printing
-
-ppExp :: Exp -> Doc
-ppExp (EBinOp e1 op e2) = parens $ ppExp e1 <+> text op <+> ppExp e2
-ppExp (EUnOp op e) = parens $ text op <+> ppExp e
-ppExp (EInt i) = int i
-ppExp (EBool True) = text "true"
-ppExp (EBool False) = text "false"
-ppExp (EVar v) = text v
-ppExp (EString s) = quotes $ text s
-ppExp EUnit = lparen <> rparen
 
 ppStmt :: Stmt -> Doc
 ppStmt (SExp e) = ppExp e
@@ -40,74 +30,13 @@ ppStmt (SIf e sts sfs) = text "if" <+> parens (ppExp e) $+$ hang (text "then") 5
 ppDecl :: Decl -> Doc
 ppDecl (Decl n ss) = text n <+> hang equals 5 (vcat $ map ppStmt ss)
 
-ppVal :: Val -> Doc
-ppVal (VInt i) = int i
-ppVal (VString s) = quotes $ text s
-ppVal (VBool True) = text "true"
-ppVal (VBool False) = text "false"
-ppVal VUnit = lparen <> rparen
-
-instance Show Val where
-    show = render . ppVal
-
 instance Show Decl where
     show = render . ppDecl
-
-instance Show Exp where
-    show = render . ppExp
 
 instance Show Stmt where
     show = render . ppStmt
 
 -- Parsing
-spacey :: Parser ()
-spacey = L.space (spaceChar >> return ()) (L.skipLineComment "--") (L.skipBlockComment "{-" "-}")
-lexeme = L.lexeme spacey
-symbol = L.symbol spacey
-
-many1 p = do
-  v <- p
-  vs <- many p
-  return $ v : vs
-
-name = lexeme (many1 letterChar)
-num = lexeme (many1 digitChar)
-paren = between (symbol "(") (symbol ")")
-bracey = between (symbol "{") (symbol "}")
-dot = symbol "."
-commaSep x = sepBy1 x (symbol ",")
-
-tries = choice . map try
-
-parseExp = tries [parseBin,
-                  parseUn,
-                  parseInt,
-                  parseBool,
-                  parseString,
-                  parseVar,
-                  parseUnit,
-                  parsePrint]
-
-parseBin = paren $ do
-             e1 <- parseExp
-             op <- many1 asciiChar
-             e2 <- parseExp
-             return $ EBinOp e1 op e2
-parseUn = paren $ do
-            op <- many1 asciiChar
-            e <- parseExp
-            return $ EUnOp op e
-parseInt = fmap (EInt . read) num
-parseBool = parseTrue <|> parseFalse
-    where parseTrue = symbol "true" >> return (EBool True)
-          parseFalse = symbol "false" >> return (EBool False)
-parseString = fmap EString $ between (symbol "\"") (symbol "\"") (many1 asciiChar)
-parseVar = fmap EVar name
-parseUnit = symbol "()" >> return EUnit
-parsePrint = do
-  symbol "print"
-  e <- paren $ parseExp
-  return $ EPrint e
 
 parseStmt = tries [fmap SExp parseExp,
                    parseReceive,
@@ -150,16 +79,6 @@ parseDecl = do
 parseProg = many1 parseDecl
 
 --
-
-data Exp = EBinOp Exp Op Exp
-         | EUnOp Op Exp
-         | EInt Int
-         | EBool Bool
-         | EString String
-         | EVar Var
-         | EUnit
-         | EPrint Exp
-         
 data Stmt = SExp Exp
           | SReceive [Var]
           | SSend Name [Exp]
@@ -168,10 +87,6 @@ data Stmt = SExp Exp
 
 data Decl = Decl Name [Stmt]
 
-data Val = VInt Int
-         | VString String
-         | VBool Bool
-         | VUnit 
          
 type NEnv a = [(Name,a)]
 type VEnv a = [(Var,a)]
@@ -184,6 +99,44 @@ data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
                       self :: Name}
 
 type Interp = StateT InterpEnv IO
+
+ppVal :: Val -> Doc
+ppVal (VInt i) = int i
+ppVal (VString s) = quotes $ text s
+ppVal (VBool True) = text "true"
+ppVal (VBool False) = text "false"
+ppVal VUnit = lparen <> rparen
+
+instance Show Val where
+    show = render . ppVal
+
+data Val = VInt Int
+         | VString String
+         | VBool Bool
+         | VUnit 
+
+liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
+liftNum2 f (VInt i) (VInt j) = VInt $ f i j
+liftNum2 _ _ _ = error "type error"
+
+liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
+liftStr2 f (VString s) (VString s') = VString $ f s s'
+liftStr2 _ _ _ = error "type error"
+
+binOpTable :: [(String,Val -> Val -> Val)]
+binOpTable = [("+",liftNum2 (+)),
+              ("-",liftNum2 (-)),
+              ("*",liftNum2 (*)),
+              ("/",liftNum2 div),
+              ("++",liftStr2 (++))]
+
+liftNum :: (Int -> Int) -> Val -> Val
+liftNum f (VInt i) = VInt $ f i
+liftNum _ _ = error "type error"
+
+unOpTable :: [(String,Val -> Val)]
+unOpTable = [("inv",liftNum $ \x -> -x)]              
+
 
 putText :: String -> Interp ()
 putText s = do
@@ -215,28 +168,6 @@ forM i m = do
   a <- m
   as <- forM (i-1) m
   return $ a : as
-
-liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
-liftNum2 f (VInt i) (VInt j) = VInt $ f i j
-liftNum2 _ _ _ = error "type error"
-
-liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
-liftStr2 f (VString s) (VString s') = VString $ f s s'
-liftStr2 _ _ _ = error "type error"
-
-binOpTable :: [(String,Val -> Val -> Val)]
-binOpTable = [("+",liftNum2 (+)),
-              ("-",liftNum2 (-)),
-              ("*",liftNum2 (*)),
-              ("/",liftNum2 div),
-              ("++",liftStr2 (++))]
-
-liftNum :: (Int -> Int) -> Val -> Val
-liftNum f (VInt i) = VInt $ f i
-liftNum _ _ = error "type error"
-
-unOpTable :: [(String,Val -> Val)]
-unOpTable = [("inv",liftNum $ \x -> -x)]              
 
 interpExp :: Exp -> Interp Val
 interpExp (EBinOp e1 op e2) = do
