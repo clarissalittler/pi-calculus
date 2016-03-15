@@ -12,6 +12,8 @@ import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
 import ParserAux
 
+import Fresher
+
 type Name = String
 
 data Lam = Abs Name Lam
@@ -77,38 +79,46 @@ printParse = do
 instance Show Lam where
     show = render . ppLam
 
-type Env a = [(Name,a)]
+type Interp = FresherT IO
 
-type Interp = ReaderT (Env Lam) IO
-
-lookupM :: Name -> Interp Lam
-lookupM n = do
-  env <- ask
-  case lookup n env of
-    Nothing -> error $ "no such variable defined: " ++ n  -- might want to change this into just a variable evaluating to itself
-    Just l -> return l
-
-withVar :: Name -> Lam -> Interp a -> Interp a    
-withVar n l = local ((n,l):)
-
+rename :: Name -> Name -> Lam -> Lam
+rename n1 n2 (Print x) = Print x 
+rename n1 n2 (Var n) | n == n1 = Var n2
+                     | otherwise = Var n
+rename n1 n2 (App l1 l2) = App (rename n1 n2 l1) (rename n1 n2 l2)
+rename n1 n2 (Abs n l) | n1 == n = Abs n l
+                       | otherwise = Abs n (rename n1 n2 l)
+substInto n arg (Print n') = return (Print n')
+substInto n arg (Var n') | n == n' = return arg
+                         | otherwise = return (Var n')
+substInto n arg (App l1 l2) = do 
+  l1' <- (substInto n arg l1) 
+  l2' <- (substInto n arg l2)
+  return $ App l1' l2'
+substInto n arg (Abs n' l) 
+    | n /= n' = do 
+        l' <- substInto n arg l
+        return $ Abs  n' l'
+    | otherwise = do
+        alpha <- fresh
+        l' <- substInto n arg (rename n alpha l)
+        return $ Abs alpha l'
+                                         
 interpLam :: Lam -> Interp Val
 interpLam (Print n) = do
   liftIO $ putStrLn n
   return VUnit
-interpLam (Var n) = do
-  l <- lookupM n
-  interpLam l
+interpLam (Var n) = error "whoops, unbound variable"
 interpLam (App l1 l2) = do
   v <- interpLam l1
   case v of
-    VAbs n l'' -> withVar n l2 $ do
-                          e <- ask
-                          liftIO $ print e
-                          interpLam l''
+    VAbs n l'' -> do 
+           l''' <- (substInto n l2 l'')
+           interpLam l'''
     _ -> error "unit applied as a function"
 interpLam (Abs n l) = return $ VAbs n l
 
-interpProgram p = runReaderT (interpLam p) []
+interpProgram p = runFresherT' (interpLam p) 
 
 interpProgram' p = case runParser parseLam "input" p of
                      Left err -> error (show err)
