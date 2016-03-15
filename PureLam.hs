@@ -24,6 +24,11 @@ data Lam = Abs Name Lam
 data Val = VUnit 
          | VAbs Name Lam
 
+boundVars :: Lam -> [Name]
+boundVars (Abs n l) = n : boundVars l
+boundVars (App l1 l2) = boundVars l1 ++ boundVars l2
+boundVars _ = []
+
 zero :: Lam
 zero = Abs "s" (Abs "z" (Var "z"))
 
