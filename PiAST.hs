@@ -4,13 +4,16 @@ import Control.Concurrent
 import Control.Monad
 import System.IO
 import Control.Monad.Reader
+import ParserAux
+import Exp
+import Fresher
 
 import Text.PrettyPrint.HughesPJ
 
 type Name = String
-type Var = String
 
 data Value = VName Name
+           | VString String
            | VInt Int
            | VUnit
            deriving (Read, Show)
@@ -26,27 +29,12 @@ ppProc (Nu n p) = text ("nu @" ++ n ++ ".") <+> ppProc p
 ppProc (Serv p) = text "!" <> ppProc p
 ppProc Terminate = text "end"
 
-ppExp (EWrite e) = text "write" <> parens (ppExp e)
-ppExp (EAdd e1 e2) = ppExp e1 <+> text "+" <+> ppExp e2
-ppExp (ENeg e) = text "-" <> ppExp e
-ppExp (EMult e1 e2) = ppExp e1 <+> text "*" <+> ppExp e2
-ppExp (EVal v) = ppVal v
-ppExp (EVar n) = text n
-
 data Proc = Receive Name Name Proc
           | Send Name Exp Proc
           | Par Proc Proc
           | Nu Name Proc
           | Serv Proc
           | Terminate
-
-data Exp = EWrite Exp
-         | EAdd Exp Exp
-         | ENeg Exp
-         | EMult Exp Exp
-         | EVal Value 
-         | EVar Name
-
 
 type NEnv a = [(Name,a)]
 type VEnv a = [(Var,a)]
@@ -109,25 +97,22 @@ liftNumV2 op (VInt i) (VInt j) = VInt $ op i j
 liftNumV2 _ _ _ = error "type error in numeric operation"
 
 interpExp :: Exp -> Interp Value
-interpExp (EWrite e) = do 
+interpExp EUnit = return VUnit
+interpExp (EPrint e) = do 
   v <- interpExp e
   liftIO (print v)
-  return v
-interpExp (EAdd e1 e2) = do
-  v1 <- interpExp e1
-  v2 <- interpExp e2
-  return $ liftNumV2 (+) v1 v2
-interpExp (ENeg e) = interpExp e >>= (return . liftNumV (\x -> -x))
-interpExp (EMult e1 e2) = do
-  v1 <- interpExp e1
-  v2 <- interpExp e2
-  return $ liftNumV2 (+) v1 v2
-interpExp (EVal v) = return v
+  return VUnit
+interpExp (EBool True) = return $ VName "true"
+interpExp (EBool False) = return $ VName "false"
+interpExp (EBinOp e1 op e2) = undefined
+interpExp (EUnOp op e) = undefined
 interpExp (EVar n) = do
   ve <- asks venv
   case lookup n ve of
     Nothing -> error "unbound variable"
     Just x -> return x
+interpExp (EInt i) = return $ VInt i
+interpExp (EString s) = return $ VString s
 
 readerThread c = do
   w <- readChan c
