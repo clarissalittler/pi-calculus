@@ -35,11 +35,11 @@ instance Show Exp where
 
 parseExp = tries [parsePrint,
                   parseString,
-                  parseBin,
-                  parseUn,
                   parseInt,
                   parseBool,
                   parseVar,
+                  parseBin,
+                  parseUn,
                   parseUnit]
 
 parseBin = paren $ do

@@ -38,11 +38,11 @@ instance Show Stmt where
 
 -- Parsing
 
-parseStmt = tries [fmap SExp parseExp,
-                   parseReceive,
+parseStmt = tries [parseReceive,
                    parseSend,
                    parseWhile,
-                   parseIf]
+                   parseIf,
+                   fmap SExp parseExp]
 
 parseBlock = bracey $ many1 parseStmt
 
