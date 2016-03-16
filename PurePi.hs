@@ -11,6 +11,7 @@ import Text.PrettyPrint.HughesPJ
 import Text.Megaparsec
 import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
+import ParserAux
 
 type Name = String
 
@@ -38,23 +39,6 @@ ppProc (Nu n p) = text ("nu " ++ n ++ ".") <+> ppProc p
 ppProc (Serv p) = text "!" <> ppProc p
 ppProc Terminate = text "end"
 ppProc (Print n) = text "print" <> parens (text n)
-
--- parsing code 
-spacey :: Parser ()
-spacey = L.space (spaceChar >> return ()) (L.skipLineComment "--") (L.skipBlockComment "{-" "-}")
-lexeme = L.lexeme spacey
-symbol = L.symbol spacey
-
-many1 p = do
-  v <- p
-  vs <- many p
-  return $ v : vs
-
-name = lexeme (many1 letterChar)
-paren = between (symbol "(") (symbol ")")
-dot = symbol "."
-
-tries = choice . map try
 
 parseProc = tries [sendParse,
                    receiveParse,
