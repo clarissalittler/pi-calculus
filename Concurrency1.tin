@@ -1,0 +1,13 @@
+f := {while (true) do {
+                   receive (x)
+		   print(x)
+		   send g (2)
+		   } 
+     }
+
+g := {while (true) do {
+     	    	   send f (1)
+		   receive (x)
+		   print(x)
+		   }
+}		    
