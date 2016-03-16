@@ -14,8 +14,6 @@ import Text.Megaparsec
 import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
 
-type Value = Name
-
 -- Pretty Printing
 
 ppStmt :: Stmt -> Doc
@@ -86,10 +84,6 @@ data Stmt = SExp Exp
 
 data Decl = Decl Name [Stmt]
 
-         
-type NEnv a = [(Name,a)]
-type VEnv a = [(Var,a)]
-
 type Inbox = Chan Val
 
 data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
@@ -98,49 +92,6 @@ data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
                       self :: Name}
 
 type Interp = StateT InterpEnv IO
-
-ppVal :: Val -> Doc
-ppVal (VInt i) = int i
-ppVal (VString s) = quotes $ text s
-ppVal (VBool True) = text "true"
-ppVal (VBool False) = text "false"
-ppVal VUnit = lparen <> rparen
-ppVal (VName n) = text "@" <> text n
-
-instance Show Val where
-    show = render . ppVal
-
-data Val = VInt Int
-         | VString String
-         | VBool Bool
-         | VUnit 
-         | VName Name
-
-liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
-liftNum2 f (VInt i) (VInt j) = VInt $ f i j
-liftNum2 _ _ _ = error "type error"
-
-liftNumBool2 :: (Int -> Int -> Bool) -> Val -> Val -> Val
-liftNumBool2 f (VInt i) (VInt j) = VBool $ f i j
-liftNumBool2 _ _ _ = error "type error"
-
-liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
-liftStr2 f (VString s) (VString s') = VString $ f s s'
-liftStr2 _ _ _ = error "type error"
-
-binOpTable :: [(String,Val -> Val -> Val)]
-binOpTable = [("+",liftNum2 (+)),
-              ("-",liftNum2 (-)),
-              ("<",liftNumBool2 (<)),
-              ("*",liftStr2 (++))]
-
-liftNum :: (Int -> Int) -> Val -> Val
-liftNum f (VInt i) = VInt $ f i
-liftNum _ _ = error "type error"
-
-unOpTable :: [(String,Val -> Val)]
-unOpTable = [("inv",liftNum $ \x -> -x)]              
-
 
 putText :: String -> Interp ()
 putText s = do
@@ -264,3 +215,4 @@ runProg ds = do
   inboxes <- mapM makeInbox ds
   mapM_ (\(Decl n ss) -> forkIO' $ runStateT (interpSeq ss) (IE inboxes [] outChan n)) ds
 
+runFile filename = readFile filename >>= interpProgram'

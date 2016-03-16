@@ -9,18 +9,9 @@ import Exp
 import Fresher
 
 import Text.PrettyPrint.HughesPJ
+import Text.Megaparsec
+import Text.Megaparsec.String
 
-type Name = String
-
-data Value = VName Name
-           | VString String
-           | VInt Int
-           | VUnit
-           deriving (Read, Show)
-
-ppVal (VName n) = text $ "@" ++ n
-ppVal (VInt i) = int i
-ppVal (VUnit) = lparen <> rparen
 
 ppProc (Receive x y p) = text ("@" ++ x) <> parens (text y) <> text "." <> ppProc p
 ppProc (Send n e p) = text ("@" ++ n) <> parens (ppExp e) <+> ppProc p
@@ -36,13 +27,46 @@ data Proc = Receive Name Name Proc
           | Serv Proc
           | Terminate
 
-type NEnv a = [(Name,a)]
-type VEnv a = [(Var,a)]
+parseProc = tries [sendParse,
+                   receiveParse,
+                   parParse,
+                   nuParse,
+                   termParse,
+                   serveParse]
 
-data InterpEnv = IE { menv :: NEnv (MVar Value), -- inboxes
-                      venv :: VEnv Value, -- value env
-                      outc :: Chan String, -- output queue
-                      inc :: Chan String} -- input queue
+sendParse = do 
+  symbol "@"
+  x <- name
+  e <- paren parseExp
+  dot
+  p <- parseProc
+  return $ Send x e p
+receiveParse = do
+  x <- name
+  y <- paren name
+  dot
+  p <- parseProc
+  return $ Receive x y p
+parParse = paren $ do
+             p1 <- parseProc
+             symbol "|"
+             p2 <- parseProc
+             return $ Par p1 p2
+nuParse = do
+  symbol "nu"
+  x <- name
+  dot
+  p <- parseProc
+  return $ Nu x p
+termParse = symbol "end" >> return Terminate
+serveParse = do
+  symbol "!"
+  p <- parseProc
+  return $ Serv p
+
+data InterpEnv = IE { menv :: NEnv (MVar Val), -- inboxes
+                      venv :: VEnv Val, -- value env
+                      outc :: Chan String} -- input queue
 
 type Interp = ReaderT InterpEnv IO
 
@@ -52,15 +76,15 @@ forkM x = do
   liftIO $ forkIO $ (runReaderT x e >> return ())
   return ()
 
-withInbox :: Name -> MVar Value -> Interp a -> Interp a
+withInbox :: Name -> MVar Val -> Interp a -> Interp a
 withInbox n m = local $ \e -> let ms = menv e 
                              in e{menv = ((n,m) : ms)}
 
-withVal :: Name -> Value -> Interp a -> Interp a
+withVal :: Name -> Val -> Interp a -> Interp a
 withVal n v = local $ \e -> let vn = venv e
                             in e{venv = ((n,v) : vn)}
 
-lookupMVar :: Name -> Interp (MVar Value)
+lookupMVar :: Name -> Interp (MVar Val)
 lookupMVar n = do
   env <- asks menv
   case lookup n env of
@@ -88,15 +112,7 @@ interpProc (Receive c y p) = do
   v <- liftIO $ readMVar m
   withVal y v $ interpProc p
 
-liftNumV :: (Int -> Int) -> Value -> Value
-liftNumV op (VInt i) = VInt (op i)
-liftNumV _ _ = error "type error in numeric operation"
-
-liftNumV2 :: (Int -> Int -> Int) -> Value -> Value -> Value
-liftNumV2 op (VInt i) (VInt j) = VInt $ op i j
-liftNumV2 _ _ _ = error "type error in numeric operation"
-
-interpExp :: Exp -> Interp Value
+interpExp :: Exp -> Interp Val
 interpExp EUnit = return VUnit
 interpExp (EPrint e) = do 
   v <- interpExp e
@@ -104,8 +120,17 @@ interpExp (EPrint e) = do
   return VUnit
 interpExp (EBool True) = return $ VName "true"
 interpExp (EBool False) = return $ VName "false"
-interpExp (EBinOp e1 op e2) = undefined
-interpExp (EUnOp op e) = undefined
+interpExp (EBinOp e1 op e2) = do
+  v1 <- interpExp e1
+  v2 <- interpExp e2
+  case lookup op binOpTable of
+    Nothing -> error "unknown operation"
+    Just op' -> return $ op' v1 v2
+interpExp (EUnOp op e) = do
+  v <- interpExp e
+  case lookup op unOpTable of
+    Nothing -> error "unknown operation"
+    Just op' -> return $ op' v
 interpExp (EVar n) = do
   ve <- asks venv
   case lookup n ve of
@@ -113,8 +138,20 @@ interpExp (EVar n) = do
     Just x -> return x
 interpExp (EInt i) = return $ VInt i
 interpExp (EString s) = return $ VString s
+interpExp (EName n) = return $ VName n
 
 readerThread c = do
   w <- readChan c
   putStrLn w
   readerThread c
+
+interpProgram' prog = case runParser parseProc "input" prog of
+                        Left err -> error (show err)
+                        Right p -> interpProgram p
+
+interpProgram prog = do
+  outChan <- newChan
+  forkIO $ readerThread outChan
+  runReaderT (interpProc prog) (IE [] [] outChan)
+
+runFile filename = readFile filename >>= interpProgram'

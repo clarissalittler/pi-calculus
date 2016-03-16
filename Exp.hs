@@ -1,5 +1,10 @@
 module Exp where
 
+import Control.Concurrent
+import Control.Monad hiding (forM)
+import System.IO
+import Control.Monad.State hiding (forM)
+
 import Text.PrettyPrint.HughesPJ
 import ParserAux
 
@@ -11,6 +16,9 @@ type Op = String
 type Var = String
 type Name = String
 
+type NEnv a = [(Name,a)]
+type VEnv a = [(Var,a)]
+
 data Exp = EBinOp Exp Op Exp
          | EUnOp Op Exp
          | EInt Int
@@ -20,6 +28,49 @@ data Exp = EBinOp Exp Op Exp
          | EUnit
          | EPrint Exp
          | EName Name
+
+data Val = VInt Int
+         | VString String
+         | VBool Bool -- not used for Enriched Pi
+         | VUnit 
+         | VName Name
+
+liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
+liftNum2 f (VInt i) (VInt j) = VInt $ f i j
+liftNum2 _ _ _ = error "type error"
+
+liftNumBool2 :: (Int -> Int -> Bool) -> Val -> Val -> Val
+liftNumBool2 f (VInt i) (VInt j) = VBool $ f i j
+liftNumBool2 _ _ _ = error "type error"
+
+liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
+liftStr2 f (VString s) (VString s') = VString $ f s s'
+liftStr2 _ _ _ = error "type error"
+
+binOpTable :: [(String,Val -> Val -> Val)]
+binOpTable = [("+",liftNum2 (+)),
+              ("-",liftNum2 (-)),
+              ("<",liftNumBool2 (<)),
+              ("*",liftStr2 (++))]
+
+liftNum :: (Int -> Int) -> Val -> Val
+liftNum f (VInt i) = VInt $ f i
+liftNum _ _ = error "type error"
+
+unOpTable :: [(String,Val -> Val)]
+unOpTable = [("inv",liftNum $ \x -> -x)]
+
+
+ppVal :: Val -> Doc
+ppVal (VInt i) = int i
+ppVal (VString s) = quotes $ text s
+ppVal (VBool True) = text "true"
+ppVal (VBool False) = text "false"
+ppVal VUnit = lparen <> rparen
+ppVal (VName n) = text "@" <> text n
+
+instance Show Val where
+    show = render . ppVal
 
 ppExp :: Exp -> Doc
 ppExp (EBinOp e1 op e2) = parens $ ppExp e1 <+> text op <+> ppExp e2
