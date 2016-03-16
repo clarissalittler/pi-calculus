@@ -14,7 +14,6 @@ import Text.Megaparsec
 import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
 
-type Name = String
 type Value = Name
 
 -- Pretty Printing
@@ -22,7 +21,7 @@ type Value = Name
 ppStmt :: Stmt -> Doc
 ppStmt (SExp e) = ppExp e
 ppStmt (SReceive vs) = text "receive" <+> (parens $ sep $ punctuate comma $ map text vs)
-ppStmt (SSend n es) = text "send" <+> text n <+> (parens $ sep $ punctuate comma $ map ppExp es)
+ppStmt (SSend n es) = text "send" <+> ppExp n <+> (parens $ sep $ punctuate comma $ map ppExp es)
 ppStmt (SWhile e ss) = text "while" <+> parens (ppExp e) <+> hang (text "do") 5 (braces $ hsep $ map ppStmt ss)
 ppStmt (SIf e sts sfs) = text "if" <+> parens (ppExp e) $+$ hang (text "then") 5 (braces $ hsep $ map ppStmt sts) 
                          $+$ hang (text "else") 5 (braces $ hsep $ map ppStmt sfs)
@@ -52,7 +51,7 @@ parseReceive = do
   return $ SReceive vs
 parseSend = do
   symbol "send"
-  n <- name
+  n <- parseExp
   es <- paren $ commaSep parseExp
   return $ SSend n es
 parseWhile = do
@@ -81,7 +80,7 @@ parseProg = many1 parseDecl
 --
 data Stmt = SExp Exp
           | SReceive [Var]
-          | SSend Name [Exp]
+          | SSend Exp [Exp]
           | SWhile Exp [Stmt]
           | SIf Exp [Stmt] [Stmt]
 
@@ -106,6 +105,7 @@ ppVal (VString s) = quotes $ text s
 ppVal (VBool True) = text "true"
 ppVal (VBool False) = text "false"
 ppVal VUnit = lparen <> rparen
+ppVal (VName n) = text "@" <> text n
 
 instance Show Val where
     show = render . ppVal
@@ -114,6 +114,7 @@ data Val = VInt Int
          | VString String
          | VBool Bool
          | VUnit 
+         | VName Name
 
 liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
 liftNum2 f (VInt i) (VInt j) = VInt $ f i j
@@ -197,6 +198,7 @@ interpExp (EPrint e) = do
   v <- interpExp e
   putText $ show v
   return VUnit
+interpExp (EName n) = return $ VName n
   
 interpStmt :: Stmt -> Interp ()
 interpStmt (SExp e) = interpExp e >> return ()
@@ -210,10 +212,14 @@ interpStmt (SIf e1 st sf) = do
   case v of
     VBool b -> if b then interpSeq st else interpSeq sf
     _ -> error "type error: non-boolean used in if statement"
-interpStmt (SSend n es) = do
-  c <- lookupInbox n
-  vals <- mapM interpExp es
-  liftIO $ writeList2Chan c vals
+interpStmt (SSend ne es) = do
+  ne' <- interpExp ne
+  case ne' of
+    VName n -> do
+             c <- lookupInbox n
+             vals <- mapM interpExp es
+             liftIO $ writeList2Chan c vals
+    _ -> error "can't send to a non-name"
 interpStmt (SWhile e s) = do
   v <- interpExp e
   case v of

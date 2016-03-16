@@ -1,16 +1,16 @@
 f := {
-       send h (1)
+       send @h (1)
        while (true) do {
        receive (x)
-       send h (x)
+       send @h (x)
        }
       }
 
 g := {
-       send h (1)
+       send @h (1)
        while (true) do {
        receive (x)
-       send h (x)
+       send @h (x)
        }
       }
 
@@ -18,8 +18,8 @@ h := {
        receive (x,y)
        while ((x < 100000)) do {
         print ((x + y))
-        send f (y)
-        send g ((x + y))
+        send @f (y)
+        send @g ((x + y))
         receive (x,y)
        }
       }

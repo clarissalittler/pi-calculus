@@ -14,7 +14,10 @@ many1 p = do
   vs <- many p
   return $ v : vs
 
-name = lexeme (many1 letterChar)
+name = lexeme $ do
+         c <- letterChar 
+         cs <- many (letterChar <|> digitChar)
+         return $ c : cs
 num = lexeme (many1 digitChar)
 paren = between (symbol "(") (symbol ")")
 bracey = between (symbol "{") (symbol "}")
