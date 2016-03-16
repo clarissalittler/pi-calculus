@@ -44,11 +44,11 @@ parseExp = tries [parsePrint,
 
 parseBin = paren $ do
              e1 <- parseExp
-             op <- many1 asciiChar
+             op <- lexeme (oneOf "+-*<")
              e2 <- parseExp
-             return $ EBinOp e1 op e2
+             return $ EBinOp e1 [op] e2
 parseUn = paren $ do
-            op <- many1 asciiChar
+            op <- symbol "inv"
             e <- parseExp
             return $ EUnOp op e
 parseInt = fmap (EInt . read) num
@@ -62,4 +62,3 @@ parsePrint = do
   symbol "print"
   e <- paren $ parseExp
   return $ EPrint e
-

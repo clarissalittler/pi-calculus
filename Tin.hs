@@ -119,6 +119,10 @@ liftNum2 :: (Int -> Int -> Int) -> Val -> Val -> Val
 liftNum2 f (VInt i) (VInt j) = VInt $ f i j
 liftNum2 _ _ _ = error "type error"
 
+liftNumBool2 :: (Int -> Int -> Bool) -> Val -> Val -> Val
+liftNumBool2 f (VInt i) (VInt j) = VBool $ f i j
+liftNumBool2 _ _ _ = error "type error"
+
 liftStr2 :: (String -> String -> String) -> Val -> Val -> Val
 liftStr2 f (VString s) (VString s') = VString $ f s s'
 liftStr2 _ _ _ = error "type error"
@@ -126,9 +130,8 @@ liftStr2 _ _ _ = error "type error"
 binOpTable :: [(String,Val -> Val -> Val)]
 binOpTable = [("+",liftNum2 (+)),
               ("-",liftNum2 (-)),
-              ("*",liftNum2 (*)),
-              ("/",liftNum2 div),
-              ("++",liftStr2 (++))]
+              ("<",liftNumBool2 (<)),
+              ("*",liftStr2 (++))]
 
 liftNum :: (Int -> Int) -> Val -> Val
 liftNum f (VInt i) = VInt $ f i
