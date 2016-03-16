@@ -28,7 +28,7 @@ ppStmt (SIf e sts sfs) = text "if" <+> parens (ppExp e) $+$ hang (text "then") 5
                          $+$ hang (text "else") 5 (braces $ hsep $ map ppStmt sfs)
 
 ppDecl :: Decl -> Doc
-ppDecl (Decl n ss) = text n <+> hang equals 5 (vcat $ map ppStmt ss)
+ppDecl (Decl n ss) = text n <+> hang (text ":=") 5 (vcat $ map ppStmt ss)
 
 instance Show Decl where
     show = render . ppDecl
@@ -240,6 +240,13 @@ runFile f = do
   case parse parseProg f progText of
     Left e -> error $ show e
     Right p -> runProg p
+
+runExp :: Exp -> IO ()
+runExp e = do
+  outChan <- newChan
+  forkIO $ outThread outChan
+  runStateT (interpExp e) (IE [] [] outChan "self")
+  return ()
 
 runProg :: [Decl] -> IO ()
 runProg ds = do

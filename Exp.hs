@@ -28,18 +28,19 @@ ppExp (EBool False) = text "false"
 ppExp (EVar v) = text v
 ppExp (EString s) = quotes $ text s
 ppExp EUnit = lparen <> rparen
+ppExp (EPrint e) = text "print" <> parens (ppExp e) 
 
 instance Show Exp where
     show = render . ppExp
 
-parseExp = tries [parseBin,
+parseExp = tries [parsePrint,
+                  parseString,
+                  parseBin,
                   parseUn,
                   parseInt,
                   parseBool,
-                  parseString,
                   parseVar,
-                  parseUnit,
-                  parsePrint]
+                  parseUnit]
 
 parseBin = paren $ do
              e1 <- parseExp
@@ -54,7 +55,7 @@ parseInt = fmap (EInt . read) num
 parseBool = parseTrue <|> parseFalse
     where parseTrue = symbol "true" >> return (EBool True)
           parseFalse = symbol "false" >> return (EBool False)
-parseString = fmap EString $ between (symbol "\"") (symbol "\"") (many1 asciiChar)
+parseString = fmap EString $ between (symbol "\"") (symbol "\"") (many1 (alphaNumChar <|> spaceChar))
 parseVar = fmap EVar name
 parseUnit = symbol "()" >> return EUnit
 parsePrint = do
