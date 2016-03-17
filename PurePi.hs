@@ -122,7 +122,7 @@ substName x y (Nu n p) | x /= n && y /= n = Nu n (substName x y p)
 
 interpProc :: Proc -> Interp ()
 interpProc (Print n) = putText n
-interpProc Terminate = return () -- putText "thread ended"
+interpProc Terminate = return ()
 interpProc (Par p1 p2) = do
   forkM $ interpProc p1
   interpProc p2

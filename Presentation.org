@@ -4,59 +4,252 @@
 #+startup: beamer
 #+BEAMER_THEME: Madrid
 #+LaTeX_CLASS: beamer
-#+LaTeX_CLASS_OPTIONS: [bigger]
 
-#+BEAMER_FRAME_LEVEL: 2
-* Models of Computation
-** This Talk
-   + A brief introduction to the $\pi$ calculus \pause
-   + Milner's translation of $\lambda$ into $\pi$ \pause
-   + An enriched $\pi$ calculus \pause
-   + The Tin language \pause
-   + A translation from Tin to our enriched $\pi$
-** A Universal Model of Computation
-   + Computation is independent of any description language \pause
-   + Turing complete \pause
-   + $\lambda$ calculus \pause
-   + Real world has concurrency \pause
-   + Turing machines and $\lambda$ calculi don't
+
+* This Talk
+  + A brief introduction to the $\pi$ calculus \pause
+  + Milner's translation of $\lambda$ into $\pi$ \pause
+  + An enriched $\pi$ calculus \pause
+  + The Tin language \pause
+  + A translation from Tin to our enriched $\pi$
+* A Universal Model of Computation
+  + Computation is independent of any description language \pause
+  + Turing complete \pause
+  + $\lambda$ calculus \pause
+  + Real world has concurrency \pause
+  + Turing machines and $\lambda$ calculi don't
 * Pi Calculus
-** Pi Calculus
-   + The $\pi$ calculus was introduced by Milner et al. in '92 \pause
-   + Calculus of communicating systems \pause
-   + Processes and channels, not functions and arguments \pause
-   + Simple syntax
-** Pi Calculus
-   \begin{align*}
-     P  &:= \\
-        &(\nu x. P) \\
-	&P | Q \\
-	& x(y). P \\
-	& \overline{x}(y). P \\
-	& \perp
-   \end{align*}
-** Pure Pi Calculus
-   + Only data are channels \pause 
-   + Synchronous communication \pause
-   + A universal model of computation? \pause
-   + Milner provided an embedding of $\lambda$
-** Pi to Lambda
-
-** In This Project
-   + ~PureLam.hs~
-   + ~PurePi.hs~
-   + ~LamToPi.hs~
-** Enriched Pi Calculus
-   + Ordinary $\pi$ calculus is sparse \pause
-   + Enriched with expressions and data
-** Enriched Pi Calculus
+  + The $\pi$ calculus was introduced by Milner et al. in '92 \pause
+  + Calculus of communicating systems \pause
+  + Processes and channels, not functions and arguments \pause
+  + Simple syntax
+* Pi Calculus
+  \begin{align*}
+    P  &:= \\
+       &(\nu x. P) \\
+       &P | Q \\
+       & x(y). P \\
+       & \overline{x}(y). P \\
+       & \perp
+  \end{align*}
+* Pure Pi Calculus
+  + Only data are channels \pause 
+  + Synchronous communication \pause
+  + A universal model of computation? \pause
+  + Milner provided an embedding of $\lambda$
+* Lambda to Pi
+   The basic idea is that 
+   + Variables send the result along the channel named by the variable
+   + Abstractions 
+     + receive the argument
+     + receive the destination to send the result
+     + run the body of the function with those connections
+   + Application
+     + Runs the argument and function in parallel
+     + Connects them with fresh channels
+     + Replicates the argument in case it's used in multiple places
+* Lambda To Pi
+  \begin{align*}
+  [ x ] u &= \overbar{x}(u). \perp \\
+  [\lambda x. M] u &= u(x).u(f).[M](f) \\
+  [M N](u) &= \nu c. \nu d. ([M](c) | \overbar{c}(d).\overbar{c}(u) | !d(v).[N](v))
+  \end{align*}
+* In This Project
+  + ~PureLam.hs~
+  + ~PurePi.hs~
+  + ~LamToPi.hs~
+* Lambda Calculus
 #+BEGIN_SRC haskell :exports code
+data Lam = Abs Name Lam
+         | App Lam Lam
+         | Var Name
+         | Print Name
 
+data Val = VUnit 
+         | VAbs Name Lam
 #+END_SRC
-** Tin: An Imperative Concurrent Language
-   + Slightly higher level \pause
-   + Imperative language \pause
-     + while loops
-     + if statements
-     + sequenced code \pause
-   + 
+* Pi Calculus
+#+BEGIN_SRC haskell :exports code
+type Name = String
+
+type Value = Name
+
+data Proc = Receive Name Name Proc
+          | Send Name Name Proc
+          | Par Proc Proc
+          | Nu Name Proc
+          | Serv Proc
+          | Print Name
+          | Terminate
+#+END_SRC
+* Pi Calculus
+#+BEGIN_SRC haskell :exports code
+interpProc :: Proc -> Interp ()
+interpProc (Print n) = putText n
+interpProc Terminate = return ()
+interpProc (Par p1 p2) = do
+  forkM $ interpProc p1
+  interpProc p2
+interpProc (Serv p) = do
+  forkM $ interpProc p
+  interpProc (Serv p)
+interpProc (Nu n p) = do
+  m <- liftIO newEmptyMVar
+  withChan n m $ interpProc p
+#+END_SRC
+* Pi Calculus
+#+BEGIN_SRC haskell :exports code
+interpProc (Send x y p) = do
+  env <- asks fst
+  case lookup x env of
+    Nothing -> error "channel doesn't exist"
+    Just m -> (liftIO $ putMVar m y) >> interpProc p
+interpProc (Receive x y p) = do
+  ec <- asks fst
+  case lookup x ec of
+    Nothing -> error "channel doesn't exist"
+    Just m -> do
+      v <- liftIO $ takeMVar m
+      interpProc $ substName y v p
+#+END_SRC
+* Lambda To Pi
+#+BEGIN_SRC haskell :exports code
+transLam (L.Print n) _ = return $ P.Print n
+transLam (L.Var x) n = return $ P.Send x n P.Terminate
+transLam (L.Abs x b) n = do
+  u <- fresh
+  b' <- transLam b u
+  return $ P.Receive n x $ P.Receive n u $ b'
+transLam (L.App f a) n = do
+  c <- fresh
+  d <- fresh
+  v <- fresh
+  f' <- transLam f c 
+  a' <- transLam a v
+  return $ P.Nu c $ P.Nu d $ P.Par (P.Par f' 
+                               (P.Send c d $ P.Send c n $ P.Terminate))
+                               (P.Serv $ P.Receive d v a')
+#+END_SRC
+* Richer Languages
+  + Both $\lambda$ and $\pi$ calculus are sparse \pause
+  + Hard to program in \pause
+  + Wanted to write something higher level
+* Common Expression Language
+#+BEGIN_SRC haskell :exports code
+data Exp = EBinOp Exp Op Exp
+         | EUnOp Op Exp
+         | EInt Int
+         | EBool Bool
+         | EString String
+         | EVar Var
+         | EUnit
+         | EPrint Exp
+         | EName Name
+
+data Val = VInt Int
+         | VString String
+         | VBool Bool
+         | VUnit 
+         | VName Name
+#+END_SRC
+* Enriched Pi Calculus
+  + Ordinary $\pi$ calculus is sparse \pause
+  + Enriched with expressions and data
+* Enriched Pi Calculus
+#+BEGIN_SRC haskell :exports code
+data Proc = Receive Exp Name Proc
+          | Send Exp Exp Proc
+          | Par Proc Proc
+          | Nu Name Proc
+          | Serv Proc
+          | If Exp Proc Proc
+          | Terminate
+#+END_SRC
+* Tin: An Imperative Concurrent Language
+  + Slightly higher level \pause
+  + Imperative language \pause
+    + while loops
+    + if statements
+    + sequenced code
+* Tin: Concurrency Model
+  + Each declaration is a process \pause
+  + Each process runs in parallel \pause
+  + Each process can receive or send messages \pause
+  + Sending and receiving is a blocking action \pause
+  + No primitive locking
+* Tin AST
+#+BEGIN_SRC haskell :exports code
+data Stmt = SExp Exp
+          | SReceive [Var]
+          | SSend Exp [Exp]
+          | SWhile Exp [Stmt]
+          | SIf Exp [Stmt] [Stmt]
+
+data Decl = Decl Name [Stmt]
+
+type Inbox = Chan Val
+
+data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
+                      venv :: VEnv Val, -- value env
+                      outc :: Chan String, -- output queue
+                      self :: Name}
+
+type Interp = StateT InterpEnv IO
+#+END_SRC
+* Fibonacci in Tin
+*** 								      :BMCOL:
+    :PROPERTIES:
+    :BEAMER_col: 0.45
+    :END:
+#+BEGIN_EXAMPLE
+f := {
+       send @h (1)
+       while (true) do {
+       receive (x)
+       send @h (x)
+       }
+      }
+
+g := {
+       send @h (1)
+       while (true) do {
+       receive (x)
+       send @h (x)
+       }
+      }
+#+END_EXAMPLE
+*** 								      :BMCOL:
+    :PROPERTIES:
+    :BEAMER_col: 0.45
+    :END:
+#+BEGIN_EXAMPLE
+h := { 
+       receive (x,y)
+       while ((x < 100000)) do {
+        print ((x + y))
+        send @f (y)
+        send @g ((x + y))
+        receive (x,y)
+       }
+      }
+#+END_EXAMPLE
+* Tin to Enriched Pi
+#+BEGIN_SRC haskell :exports code
+progToPi :: [T.Decl] -> P.Proc
+
+blockToProc :: String -> [T.Stmt] -> P.Proc -> Fresher P.Proc
+
+stmtToProc :: String -> T.Stmt -> P.Proc -> Fresher P.Proc 
+stmtToProc n (T.SWhile e ss) p = do
+  sp <- blockToProc n ss P.Terminate
+  conn <- fresh
+  dummy <- fresh
+  return $ P.Par (P.Serv $ P.If e sp 
+    (P.Send (EName conn) EUnit P.Terminate)) 
+    (P.Receive (EName conn) dummy p)
+stmtToProc n (T.SIf e sts sfs) p = do
+  tp <- blockToProc n sts p 
+  fp <- blockToProc n sfs p 
+  return $ P.If e tp fp
+#+END_SRC
+* Questions?
