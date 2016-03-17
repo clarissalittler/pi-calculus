@@ -214,5 +214,3 @@ runProg ds = do
   forkIO $ outThread outChan
   inboxes <- mapM makeInbox ds
   mapM_ (\(Decl n ss) -> forkIO' $ runStateT (interpSeq ss) (IE inboxes [] outChan n)) ds
-
-runFile filename = readFile filename >>= interpProgram'

@@ -13,36 +13,48 @@ import Text.Megaparsec
 import Text.Megaparsec.String
 
 
-ppProc (Receive x y p) = text ("@" ++ x) <> parens (text y) <> text "." <> ppProc p
-ppProc (Send n e p) = text ("@" ++ n) <> parens (ppExp e) <+> ppProc p
+ppProc (Receive x y p) = ppExp x <> parens (text y) <> text "." <> ppProc p
+ppProc (Send n e p) = text "&" <+> ppExp n <> parens (ppExp e) <> text "." <+> ppProc p
 ppProc (Par p1 p2) = ppProc p1 <+> text "|" <+> ppProc p2
 ppProc (Nu n p) = text ("nu @" ++ n ++ ".") <+> ppProc p
 ppProc (Serv p) = text "!" <> ppProc p
+ppProc (If e1 p1 p2) = text "if" <> parens (ppExp e1) <> text "then" <+> parens (ppProc p1) <+> text "else" <+> parens (ppProc p2)
 ppProc Terminate = text "end"
 
-data Proc = Receive Name Name Proc
-          | Send Name Exp Proc
+data Proc = Receive Exp Name Proc
+          | Send Exp Exp Proc
           | Par Proc Proc
           | Nu Name Proc
           | Serv Proc
+          | If Exp Proc Proc
           | Terminate
+
 
 parseProc = tries [sendParse,
                    receiveParse,
                    parParse,
                    nuParse,
                    termParse,
-                   serveParse]
+                   serveParse,
+                   ifParse]
+ifParse = do
+  symbol "if"
+  e <- paren parseExp
+  symbol "then"
+  pt <- paren parseProc
+  symbol "else"
+  pf <- paren parseProc
+  return $ If e pt pf
 
 sendParse = do 
-  symbol "@"
-  x <- name
+  symbol "&"
+  x <- parseExp 
   e <- paren parseExp
   dot
   p <- parseProc
   return $ Send x e p
 receiveParse = do
-  x <- name
+  x <- parseExp
   y <- paren name
   dot
   p <- parseProc
@@ -92,6 +104,11 @@ lookupMVar n = do
     Just m -> return m
 
 interpProc :: Proc -> Interp ()
+interpProc (If e pt pf) = do
+  v <- interpExp e
+  case v of
+    VBool b -> if b then interpProc pt else interpProc pf
+    _ -> error "type error in If statement"
 interpProc Terminate = return ()
 interpProc (Par p1 p2) = do
   forkM $ interpProc p1
@@ -102,15 +119,23 @@ interpProc (Serv p) = do
 interpProc (Nu n p) = do
   m <- liftIO $ newEmptyMVar
   withInbox n m $ interpProc p
-interpProc (Send n e p) = do
-  m <- lookupMVar n
-  v <- interpExp e
-  liftIO $ putMVar m v
-  interpProc p
+interpProc (Send e1 e2 p) = do
+  nn <- interpExp e1
+  case nn of
+    VName n -> do
+            m <- lookupMVar n
+            v <- interpExp e2
+            liftIO $ putMVar m v
+            interpProc p
+    _ -> error "expression didn't evaluate to name in Send"
 interpProc (Receive c y p) = do
-  m <- lookupMVar c
-  v <- liftIO $ readMVar m
-  withVal y v $ interpProc p
+  nn <- interpExp c
+  case nn of
+    VName n -> do
+            m <- lookupMVar n
+            v <- liftIO $ readMVar m
+            withVal y v $ interpProc p
+    _ -> error "expression didn't evaluate to name in Receive"
 
 interpExp :: Exp -> Interp Val
 interpExp EUnit = return VUnit

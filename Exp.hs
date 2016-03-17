@@ -31,7 +31,7 @@ data Exp = EBinOp Exp Op Exp
 
 data Val = VInt Int
          | VString String
-         | VBool Bool -- not used for Enriched Pi
+         | VBool Bool
          | VUnit 
          | VName Name
 
