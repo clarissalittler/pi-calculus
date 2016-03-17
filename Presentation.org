@@ -50,9 +50,9 @@
      + Replicates the argument in case it's used in multiple places
 * Lambda To Pi
   \begin{align*}
-  [ x ] u &= \overbar{x}(u). \perp \\
+  [ x ] u &= \overline{x}(u). \perp \\
   [\lambda x. M] u &= u(x).u(f).[M](f) \\
-  [M N](u) &= \nu c. \nu d. ([M](c) | \overbar{c}(d).\overbar{c}(u) | !d(v).[N](v))
+  [M N](u) &= \nu c. \nu d. ([M](c) | \overline{c}(d).\overline{c}(u) | !d(v).[N](v))
   \end{align*}
 * In This Project
   + ~PureLam.hs~
