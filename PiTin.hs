@@ -44,7 +44,7 @@ stmtToProc n (T.SWhile e ss) p = do
   sp <- blockToProc n ss P.Terminate
   conn <- fresh
   dummy <- fresh
-  return $ P.Par (P.Serv $ P.If e sp (P.Send (EName conn) EUnit P.Terminate)) (P.Receive (EName conn) dummy p)
+  return $ P.nu conn $ P.Par (P.Serv $ P.If e sp (P.Send (EName conn) EUnit P.Terminate)) (P.Receive (EName conn) dummy p)
 stmtToProc n (T.SIf e sts sfs) p = do
   tp <- blockToProc n sts p 
   fp <- blockToProc n sfs p 
