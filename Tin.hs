@@ -78,6 +78,8 @@ parseProg = many1 parseDecl
 --
 data Stmt = SExp Exp
           | SReceive [Var]
+          | SLock Exp [Stmt] -- within the scope of this block have an exclusive lock on the mailbox for
+                             -- the named process
           | SSend Exp [Exp]
           | SWhile Exp [Stmt]
           | SIf Exp [Stmt] [Stmt]
