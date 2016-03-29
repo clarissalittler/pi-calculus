@@ -1,0 +1,32 @@
+f := {
+       send @h (1)
+       while (true) do {
+       receive (x)
+       send @g (0)
+       send @h (x)
+       }
+      }
+
+-- the idea of this program is that since I have blocking reading and writing and locking
+-- I should be able to synchronize my code
+
+g := {
+       send @h (1)
+       while (true) do {
+       receive (x)
+       receive (y)
+       send @h (x)
+       }
+      }
+
+h := { 
+       receive (x,y)
+       while ((x < 100000)) do {
+        print ((x + y))
+	lock @g {
+          send @f (y)
+          send @g ((x + y))
+	}
+        receive (x,y)
+       }
+      }
