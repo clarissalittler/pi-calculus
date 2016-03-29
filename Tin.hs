@@ -14,6 +14,8 @@ import Text.Megaparsec
 import Text.Megaparsec.String
 import qualified Text.Megaparsec.Lexer as L
 
+{- To add locks to the language I suppose I could switch over to STM, or I could use semaphores. Why don't I just use semaphores? -} 
+
 -- Pretty Printing
 
 ppStmt :: Stmt -> Doc
@@ -23,6 +25,7 @@ ppStmt (SSend n es) = text "send" <+> ppExp n <+> (parens $ sep $ punctuate comm
 ppStmt (SWhile e ss) = text "while" <+> parens (ppExp e) <+> hang (text "do") 5 (braces $ hsep $ map ppStmt ss)
 ppStmt (SIf e sts sfs) = text "if" <+> parens (ppExp e) $+$ hang (text "then") 5 (braces $ hsep $ map ppStmt sts) 
                          $+$ hang (text "else") 5 (braces $ hsep $ map ppStmt sfs)
+ppStmt (SLock e bs) = text "lock" <+> ppExp e <+> nest 5 (braces $ hsep $ map ppStmt bs)
 
 ppDecl :: Decl -> Doc
 ppDecl (Decl n ss) = text n <+> hang (text ":=") 5 (vcat $ map ppStmt ss)
@@ -39,9 +42,16 @@ parseStmt = tries [parseReceive,
                    parseSend,
                    parseWhile,
                    parseIf,
+                   parseLock,
                    fmap SExp parseExp]
 
 parseBlock = bracey $ many1 parseStmt
+
+parseLock = do
+  symbol "lock"
+  n <- parseExp
+  block <- parseBlock
+  return $ SLock n block
 
 parseReceive = do
   symbol "receive"
@@ -86,7 +96,7 @@ data Stmt = SExp Exp
 
 data Decl = Decl Name [Stmt]
 
-type Inbox = Chan Val
+data Inbox = Inbox {sem :: QSem, chan :: (Chan Val)}
 
 data InterpEnv = IE { inboxes :: NEnv Inbox, -- inboxes
                       venv :: VEnv Val, -- value env
@@ -158,7 +168,7 @@ interpStmt (SExp e) = interpExp e >> return ()
 interpStmt (SReceive vs) = do
   n <- gets self
   c <- lookupInbox n
-  vals <- forM (length vs - 1) (liftIO $ readChan c)
+  vals <- forM (length vs - 1) (liftIO $ readChan $ chan c)
   mapM_ (uncurry addVars) $ zip vs vals
 interpStmt (SIf e1 st sf) = do
   v <- interpExp e1
@@ -169,7 +179,7 @@ interpStmt (SSend ne es) = do
   ne' <- interpExp ne
   case ne' of
     VName n -> do
-             c <- lookupInbox n
+             c <- chan `fmap` lookupInbox n
              vals <- mapM interpExp es
              liftIO $ writeList2Chan c vals
     _ -> error "can't send to a non-name"
@@ -178,6 +188,15 @@ interpStmt (SWhile e s) = do
   case v of
     VBool b -> if b then interpSeq s >> interpStmt (SWhile e s) else return ()
     _ -> error "type error: non-boolean used in while statement"
+interpStmt (SLock e b) = do
+  v <- interpExp e
+  case v of
+    VName n -> do
+           (Inbox sem c) <- lookupInbox n
+           liftIO $ waitQSem sem
+           interpSeq b
+           liftIO $ signalQSem sem
+    _ -> error "can't send to a non-name"
 
 loop :: Monad m => m () -> m ()
 loop d = d >> (loop d)
@@ -189,7 +208,8 @@ outThread c = loop $ do
 makeInbox :: Decl -> IO (Name,Inbox)
 makeInbox (Decl n _) = do
   m <- newChan
-  return (n,m)
+  q <- newQSem 1
+  return (n,Inbox q m)
 
 interpSeq :: [Stmt] -> Interp ()
 interpSeq = mapM_ interpStmt
